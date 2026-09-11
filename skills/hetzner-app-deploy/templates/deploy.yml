@@ -1,0 +1,72 @@
+name: Deploy
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+on:
+  workflow_run:
+    workflows: ["Validation"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Hetzner
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authorise runner against the server
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ vars.SSH_HOST }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY" || { echo "::error::SSH_PRIVATE_KEY secret is not set"; exit 1; }
+          test -n "$SSH_HOST" || { echo "::error::SSH_HOST variable is not set"; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Write /srv/__APP_NAME__/.env from repository secrets
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+        run: |
+          test -n "$POSTGRES_PASSWORD" || { echo "::error::POSTGRES_PASSWORD secret is not set"; exit 1; }
+          test -n "$SESSION_SECRET" || { echo "::error::SESSION_SECRET secret is not set"; exit 1; }
+          ssh -i ~/.ssh/id_deploy "root@$SSH_HOST" 'umask 077 && cat > /srv/__APP_NAME__/.env' <<ENVFILE
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          SESSION_SECRET=$SESSION_SECRET
+          ENVFILE
+
+      - name: Pull, build, migrate, restart
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "root@$SSH_HOST" \
+            'cat > /tmp/__APP_NAME__-deploy.sh && bash /tmp/__APP_NAME__-deploy.sh; rc=$?; rm -f /tmp/__APP_NAME__-deploy.sh; exit $rc' <<'REMOTE'
+          set -euo pipefail
+          cd /srv/__APP_NAME__
+
+          git fetch --prune origin
+          git reset --hard origin/main
+
+          docker compose -f docker-compose.prod.yml build app
+          docker compose -f docker-compose.prod.yml up -d postgres
+
+          if docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U __APP_NAME__ -d __APP_NAME__ >/dev/null 2>&1; then
+            mkdir -p /var/backups/__APP_NAME__
+            SNAPSHOT="/var/backups/__APP_NAME__/pre-deploy-$(date +%F-%H%M%S).dump"
+            docker compose -f docker-compose.prod.yml exec -T postgres \
+              pg_dump -U __APP_NAME__ -d __APP_NAME__ -Fc --no-owner --no-privileges > "$SNAPSHOT"
+            test -s "$SNAPSHOT" || { echo "::error::pre-deploy dump is empty — refusing to migrate"; exit 1; }
+            find /var/backups/__APP_NAME__ -name 'pre-deploy-*.dump' -mtime +14 -delete
+          fi
+
+          docker compose -f docker-compose.prod.yml run --rm -T app pnpm run db:deploy < /dev/null
+          docker compose -f docker-compose.prod.yml up -d --force-recreate app
+          docker compose -f docker-compose.prod.yml up -d
+          docker image prune -f
+          docker compose -f docker-compose.prod.yml ps
+          REMOTE

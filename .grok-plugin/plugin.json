@@ -1,0 +1,6 @@
+{
+  "name": "hetzner-skills",
+  "description": "Hetzner production for a Node/Prisma app: firewall, Compose, Caddy, migrate, backups, GitHub deploy.",
+  "version": "0.1.0",
+  "license": "MIT"
+}

@@ -1,0 +1,19 @@
+{
+	email __ACME_EMAIL__
+}
+
+__HOSTNAME__ {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	@static path /assets/* /fonts/* /favicon.ico
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	reverse_proxy app:3000
+}
