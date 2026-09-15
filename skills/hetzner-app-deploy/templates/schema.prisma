@@ -1,0 +1,19 @@
+// Data model. Empty on purpose — the deployment scaffolding is in place, the domain is not.
+// Add models here, then `pnpm run db:migrate` to create the first migration.
+//
+// Convention: model and field names are PascalCase/camelCase for the TypeScript client,
+// while @@map/@map keep the database itself snake_case, so hand-written SQL never needs
+// double quotes.
+//
+// `prisma migrate deploy` against an empty migrations directory prints "No migration found"
+// and exits 0, so a first production deploy on this schema is safe.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/database/generated"
+}
+
+// The connection string is supplied by prisma.config.ts, which reads DATABASE_URL.
+datasource db {
+  provider = "postgresql"
+}

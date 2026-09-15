@@ -1,3 +1,20 @@
+# TEMPLATE-NOTE-START
+# ┌──────────────────────────────────────────────────────────────────────────────┐
+# │ Replace BOTH placeholders before the first deploy.                           │
+# │                                                                              │
+# │ __HOSTNAME__    the public web address, e.g. app.example.ba. A DNS A record  │
+# │                 for it must already point at the server's IPv4, or Let's     │
+# │                 Encrypt cannot validate and Caddy will crash-loop.           │
+# │ __ACME_EMAIL__  an address someone reads — Let's Encrypt sends expiry        │
+# │                 warnings there. Never guess the user's address; ask.         │
+# │                                                                              │
+# │ Caddy failing loudly beats silently serving plain HTTP, which is why these   │
+# │ stay obvious placeholders.                                                   │
+# └──────────────────────────────────────────────────────────────────────────────┘
+# TEMPLATE-NOTE-END
+# TLS is automatic, but only once DNS is real: the A record for this name must resolve
+# to this server before Caddy starts, or Let's Encrypt validation fails and Caddy
+# crash-loops. Check with `dig +short` first.
 {
 	email __ACME_EMAIL__
 }

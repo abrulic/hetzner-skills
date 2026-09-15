@@ -1,0 +1,35 @@
+# TEMPLATE-NOTE goes in the app repo as docker-compose.yml; scripts/apply.sh strips this line
+# Local development database only.
+#
+# Production Postgres lives in docker-compose.prod.yml and is never published to the
+# host — it is reachable only over the Compose network, which is why the Hetzner
+# firewall never opens 5432. Here the port *is* published so `prisma migrate dev`,
+# `prisma studio` and psql can reach it from the laptop.
+#
+# Credentials are deliberately weak and identical to the database name: this container
+# listens on localhost and holds nothing but throwaway development data.
+#
+# __DEV_DB_PORT__ is the HOST port. Do not assume 5432 — run `docker ps` first and pick
+# one nothing else has taken. A laptop that works on several of these apps will have a
+# Postgres per app, and a hardcoded 5432 means only the first one can run.
+services:
+  postgres:
+    image: postgres:17
+    container_name: __APP_NAME__-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: __APP_NAME__
+      POSTGRES_PASSWORD: __APP_NAME__
+      POSTGRES_DB: __APP_NAME__
+    ports:
+      - "__DEV_DB_PORT__:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U __APP_NAME__ -d __APP_NAME__"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

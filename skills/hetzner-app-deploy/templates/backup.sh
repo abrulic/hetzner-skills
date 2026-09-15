@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Nightly database dump. Lives in the app repo as `deploy/backup.sh` and is installed on
+# the server as /usr/local/bin/__APP_NAME__-backup.sh.
+#
+# It belongs in git, not only on the box: the invariant is that the server holds nothing
+# that is not in git or in a dump, and that has to include the thing making the dumps.
 set -euo pipefail
 
 APP=__APP_NAME__
