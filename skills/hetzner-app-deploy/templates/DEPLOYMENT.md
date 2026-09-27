@@ -191,6 +191,27 @@ crontab -e
 30 2 * * * /usr/local/bin/__APP_NAME__-backup.sh >> /var/log/__APP_NAME__-backup.log 2>&1
 ```
 
+That file is appended to nightly and nothing truncates it, so give it a rotation the day
+you create it — an unbounded log on a small disk is the same fault as an uncapped
+container log, just slower:
+
+```bash
+cat > /etc/logrotate.d/__APP_NAME__ <<'ROTATE'
+/var/log/__APP_NAME__-backup.log {
+  weekly
+  rotate 4
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+ROTATE
+logrotate --debug /etc/logrotate.d/__APP_NAME__
+```
+
+`copytruncate` because cron holds the file open across the rotation; without it the old
+inode keeps being written to and the new file stays empty.
+
 Run it once by hand and confirm a non-empty `.dump` lands in `/var/backups/__APP_NAME__/`.
 
 **Get a copy off the box** — a backup that lives only on the machine it protects is not a
@@ -243,7 +264,10 @@ Two rules that keep this safe:
 
 | When you add | Do this |
 |---|---|
-| Sessions / auth | `SESSION_SECRET` → the zod schema in `app/env.server.ts`, the `app.environment` block in `docker-compose.prod.yml`, the `.env` heredoc in the deploy workflow, and a GitHub secret |
+| Sessions / auth | `SESSION_SECRET` → the zod schema in `app/env.server.ts`, the `app.environment` block in `docker-compose.prod.yml`, the `.env` heredoc **and the required-variable loop** in the deploy workflow, and a GitHub secret. All five, every time |
+| A public origin (OAuth callbacks, links in email) | An `APP_URL` the schema requires — it cannot be inferred from a request Caddy has already proxied, and a wrong one sends somebody's browser to the wrong host mid-sign-in |
+| Transactional email | The provider's key, **and the From address**. Most providers ship a shared test sender that only delivers to the account holder; left unset in production every message is silently refused. Require both when `APP_ENV` is production |
+| Anything whose failure is swallowed | Auth flows deliberately answer the same way whether or not an address exists, which means a broken mail provider looks exactly like a working one. Its configuration has to fail at boot, because nothing downstream will |
 | File uploads | A named volume in `docker-compose.prod.yml` (uploads written into the container filesystem die with it), plus a `tar` of that volume in `deploy/backup.sh` — a database dump alone restores to broken file references |
 | Seed data | `prisma/seed.ts`, a `migrations.seed` entry in `prisma.config.ts`, and `COPY` the files it imports into the runtime stage of the `Dockerfile` |
 | A second app of yours | Do **not** add it here if it belongs to a different client. For your own apps, a shared Caddy on a `web` Docker network, one Postgres per app — see `references/host-setup.md` |

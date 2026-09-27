@@ -41,6 +41,11 @@ Install `templates/backup.sh` as `/usr/local/bin/__APP_NAME__-backup.sh`. Cron:
 30 2 * * * /usr/local/bin/__APP_NAME__-backup.sh >> /var/log/__APP_NAME__-backup.log 2>&1
 ```
 
+Rotate that file — it is appended to nightly and nothing truncates it. A
+`/etc/logrotate.d/__APP_NAME__` drop-in, `weekly rotate 4 compress copytruncate`; the full
+block is in `templates/DEPLOYMENT.md` Part 8. `copytruncate` matters: cron holds the file
+open across the rotation.
+
 Pull a copy off the box periodically (`rsync`). Test a restore once (`createdb
 restore_test`, `pg_restore`, `\dt`, `dropdb`).
 

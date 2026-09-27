@@ -1,7 +1,22 @@
+# Every container's log is capped here, and this is the only thing that caps it. Docker's
+# `json-file` driver has no limit of its own, so a stream nobody reads grows until the disk
+# does — and on a box this size the first symptom is Postgres refusing to write, which
+# reads like a database fault rather than a full disk.
+#
+# 10 MB x 3 per service is roughly a fortnight for an app of this size and survives a
+# restart loop long enough to read what caused it. If the app's privacy policy names a
+# retention period for server logs, this is the thing that decides it.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:17
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: __APP_NAME__
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -17,6 +32,7 @@ services:
   app:
     build: .
     restart: unless-stopped
+    logging: *logging
     environment:
       NODE_ENV: production
       APP_ENV: production
@@ -32,6 +48,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging: *logging
     ports:
       - "80:80"
       - "443:443"

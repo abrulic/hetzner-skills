@@ -61,6 +61,7 @@ local database. Do not assume 5432.
 | Volumes | `pgdata`, upload dirs, `caddy-data` / `caddy-config`. Never `docker compose down -v` |
 | Caddy | TLS, HSTS, reverse_proxy to `app:3000` |
 | Nightly dump | `pg_dump -Fc` to `/var/backups/<name>/`, 14 days, test a restore once |
+| Everything that grows | Container logs capped in compose, the backup cron's own log rotated, images and build cache pruned on deploy — see **Nothing may grow without a bound** |
 | GitHub | validate on PR/main; deploy only after validate succeeds; dump before migrate; `--force-recreate` app |
 
 Do the copying with the script rather than by hand — 55 substitutions of `__APP_NAME__`
@@ -93,8 +94,21 @@ Files it places:
 
 The templates carry `SESSION_SECRET` and an uploads volume because most of these apps
 grow both. **If this one has neither yet, delete them** from `docker-compose.prod.yml`
-and `deploy.yml` — the workflow guards the secret with `test -n` and will fail every
-deploy until it is set.
+and `deploy.yml` — the workflow's required-variable loop will otherwise fail every deploy
+until the secret is set.
+
+**Going the other way, every variable the app requires in production goes in three places
+at once**: the env schema's production refinement, `docker-compose.prod.yml`'s
+`environment:`, and `deploy.yml`'s required-variable loop. Miss the third and the deploy
+writes an `.env` without it; miss the first and nothing ever notices.
+
+The one that bites is **a variable with a fallback**. A default that is right in
+development and wrong in production — a provider's shared test sender, a localhost origin
+— fails nothing: the app boots, the feature runs, and it quietly does the wrong thing.
+Worse when the code swallows the error on purpose, which auth flows do so that a failure
+cannot be used to probe which addresses have accounts. If the fallback is not a correct
+production value, refine the variable as required when `APP_ENV` is production and add it
+to the loop. Refusing to boot is the only version of that failure anybody notices.
 
 Adapt Dockerfile `COPY` lines and compose `environment` / volumes to that app's env schema
 and upload paths. Match `engines.node`. Keep the invariants.
@@ -141,6 +155,22 @@ Do not report this done on files alone. The commands are in
 `db:deploy` inside it, start it, and fetch `/`. Use a throwaway `-p` project name for the
 smoke test, and tear it down without `-v`.
 
+## Nothing may grow without a bound
+
+The disk is the resource this shape of deployment runs out of first, and every symptom of
+a full one reads as something else — Postgres refusing writes, a build failing on a step
+that worked yesterday. Four things grow, and each needs saying no once:
+
+| Grows | Bounded by |
+|---|---|
+| Container logs | `x-logging` in `docker-compose.prod.yml`, on **every** service. Docker's `json-file` driver has no default cap |
+| The backup cron's own log | A `/etc/logrotate.d/<name>` drop-in, `copytruncate` — cron holds the file open across the rotation |
+| Dumps and upload tarballs | `find … -mtime +14 -delete` at the foot of `backup.sh`, and the same for the pre-deploy snapshot in `deploy.yml` |
+| Images and build cache | `docker image prune -f` **and** `docker builder prune -f --filter until=168h` on each deploy. The first does not touch the second |
+
+The deploy prints `df -h /` after pruning, so a box on its way to full says so in a log
+somebody already reads.
+
 ## Invariants
 
 - The server holds nothing that is not in git or a dump — `backup.sh` included.
@@ -160,5 +190,10 @@ smoke test, and tear it down without `-v`.
 - Skip firewall attach, empty outbound rules, or `db:deploy` before `up -d`.
 - Default the local DB to host port 5432 without checking, or reuse another app's port.
 - Add `SESSION_SECRET` (or any secret) to the env schema and workflow before the app
-  actually reads it — the workflow's `test -n` guard then fails every deploy for nothing.
+  actually reads it — the required-variable loop then fails every deploy for nothing.
+- Leave a production-required variable out of the loop because it has a default. A default
+  that is wrong in production fails silently; that is the reason it needs the guard, not a
+  reason to skip it.
+- Add a service to `docker-compose.prod.yml` without `logging: *logging`. It is the only
+  cap on that container's log, and a missing one is invisible until the disk is full.
 - Guess the Let's Encrypt email, or quietly fill in the hostname.

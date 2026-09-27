@@ -33,8 +33,18 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
         run: |
-          test -n "$POSTGRES_PASSWORD" || { echo "::error::POSTGRES_PASSWORD secret is not set"; exit 1; }
-          test -n "$SESSION_SECRET" || { echo "::error::SESSION_SECRET secret is not set"; exit 1; }
+          # Every variable the app requires in production, checked here rather than at boot:
+          # a container that restart-loops on a missing secret is a much worse way to find
+          # out than a named failure in this step.
+          #
+          # **A variable with a fallback belongs in this list too.** The dangerous kind is
+          # the one that has a default which is fine in development and wrong in production
+          # — a test sender, a localhost origin — because nothing fails, it just quietly
+          # does the wrong thing forever. If the env schema requires it when APP_ENV is
+          # production, its name goes here.
+          for required in POSTGRES_PASSWORD SESSION_SECRET; do
+            test -n "${!required}" || { echo "::error::$required is not set"; exit 1; }
+          done
           ssh -i ~/.ssh/id_deploy "root@$SSH_HOST" 'umask 077 && cat > /srv/__APP_NAME__/.env' <<ENVFILE
           POSTGRES_PASSWORD=$POSTGRES_PASSWORD
           SESSION_SECRET=$SESSION_SECRET
@@ -68,5 +78,10 @@ jobs:
           docker compose -f docker-compose.prod.yml up -d --force-recreate app
           docker compose -f docker-compose.prod.yml up -d
           docker image prune -f
+          # The build cache is the other thing that grows without being asked. `image prune`
+          # does not touch it, and on a box this size a few months of layers is gigabytes.
+          # A week is kept so the next deploy still builds fast.
+          docker builder prune -f --filter until=168h
+          df -h / | tail -1
           docker compose -f docker-compose.prod.yml ps
           REMOTE
